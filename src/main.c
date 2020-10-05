@@ -42,6 +42,8 @@
 #include <string.h>
 #include "nordic_common.h"
 #include "nrf.h"
+#include "nrf_gpio.h"
+#include "nrf_delay.h"
 #include "nrf_sdm.h"
 #include "app_error.h"
 #include "ble.h"
@@ -79,9 +81,9 @@
 #define APP_BLE_CONN_CFG_TAG                1                                       /**< A tag identifying the SoftDevice BLE configuration. */
 #define APP_BLE_OBSERVER_PRIO               3                                       /**< Application's BLE observer priority. You shouldn't need to modify this value. */
 
-#define MIN_CONN_INTERVAL                   MSEC_TO_UNITS(20, UNIT_1_25_MS)        /**< Minimum acceptable connection interval (0.4 seconds). */
-#define MAX_CONN_INTERVAL                   MSEC_TO_UNITS(40, UNIT_1_25_MS)        /**< Maximum acceptable connection interval (0.65 second). */
-#define SLAVE_LATENCY                       0                                       /**< Slave latency. */
+#define MIN_CONN_INTERVAL                   MSEC_TO_UNITS(11.25, UNIT_1_25_MS)      /**< Minimum acceptable connection interval (0.4 seconds). */
+#define MAX_CONN_INTERVAL                   MSEC_TO_UNITS(30, UNIT_1_25_MS)         /**< Maximum acceptable connection interval (0.65 second). */
+#define SLAVE_LATENCY                       2                                       /**< Slave latency. */
 #define CONN_SUP_TIMEOUT                    MSEC_TO_UNITS(4000, UNIT_10_MS)         /**< Connection supervisory timeout (4 seconds). */
 
 #define FIRST_CONN_PARAMS_UPDATE_DELAY      APP_TIMER_TICKS(5000)                   /**< Time from initiating event (connect or start of notification) to first time sd_ble_gap_conn_param_update is called (5 seconds). */
@@ -91,13 +93,13 @@
 #define DEAD_BEEF                           0xDEADBEEF                              /**< Value used as error code on stack dump, can be used to identify stack location on stack unwind. */
 
 
-APP_TIMER_DEF(m_idle_timer_id);                                     /**< IDLE timer. */
+APP_TIMER_DEF(m_idle_timer_id);                                                 /**< IDLE timer. */
 
 
-BLE_BAS_DEF(m_bas);                                                 /**< Structure used to identify the battery service. */
-NRF_BLE_GATT_DEF(m_gatt);                                           /**< GATT module instance. */
-NRF_BLE_QWR_DEF(m_qwr);                                             /**< Context for the Queued Write module.*/
-BLE_ADVERTISING_DEF(m_advertising);                                 /**< Advertising module instance. */
+BLE_BAS_DEF(m_bas);                                                             /**< Structure used to identify the battery service. */
+NRF_BLE_GATT_DEF(m_gatt);                                                       /**< GATT module instance. */
+NRF_BLE_QWR_DEF(m_qwr);                                                         /**< Context for the Queued Write module.*/
+BLE_ADVERTISING_DEF(m_advertising);                                             /**< Advertising module instance. */
 BLE_SENSOR_SERVICE_DEF(m_sensor_service, NRF_SDH_BLE_TOTAL_LINK_COUNT);     
 
 static uint16_t m_conn_handle         = BLE_CONN_HANDLE_INVALID;                       /**< Handle of the current connection. */
@@ -146,11 +148,8 @@ static void sensor_service_data_handler(ble_sensor_service_evt_t * p_evt)
     }
     else if(p_evt->type == BLE_SENSOR_SERVICE_EVT_TRANSMIT_RDY)
     {
-//       NRF_LOG_INFO("SENSOR EVT TRANSMIT RDY"); 
-//       NRF_LOG_FLUSH();
     } 
 };
-
 /* End of Sensor Service */
 
 /**@brief Callback function for asserts in the SoftDevice.
@@ -467,6 +466,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
             sensor_service_status.is_notification_enabled = 0;
             sensor_service_status.is_transfer_started = 0;
 
+            nrf_gpio_pin_set(14);
             break;
 
         case BLE_GAP_EVT_DISCONNECTED:
@@ -476,15 +476,17 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
 
             sensor_service_status.is_notification_enabled = 0;
             sensor_service_status.is_transfer_started = 0;
+
+            nrf_gpio_pin_clear(14);
             break;
 
         case BLE_GAP_EVT_PHY_UPDATE_REQUEST:
         {
-//            NRF_LOG_INFO("PHY update request.");
+            NRF_LOG_INFO("PHY update request.");
             ble_gap_phys_t const phys =
             {
-                .rx_phys = BLE_GAP_PHY_2MBPS,
-                .tx_phys = BLE_GAP_PHY_2MBPS,
+                .rx_phys = BLE_GAP_PHY_AUTO,
+                .tx_phys = BLE_GAP_PHY_AUTO,
             };
             err_code = sd_ble_gap_phy_update(p_ble_evt->evt.gap_evt.conn_handle, &phys);
             APP_ERROR_CHECK(err_code);
@@ -634,6 +636,12 @@ static void idle_state_handle(void)
  */
 int main(void)
 {
+    nrf_gpio_cfg_output(14);
+    nrf_gpio_cfg_output(15);
+    nrf_gpio_pin_clear(14);
+    nrf_gpio_pin_set(15);
+    nrf_delay_ms(500);
+
     // Initialize.
     log_init();
     timers_init();
@@ -648,6 +656,7 @@ int main(void)
     // Start execution.
     NRF_LOG_INFO("Bluetooth example started.");
     advertising_start();
+    nrf_gpio_pin_clear(15);
 
     // Enter main loop.
     while(1)
@@ -655,91 +664,79 @@ int main(void)
         // SEND DATA //
         if(sensor_service_status.is_transfer_started == 1)
         {
-          uint32_t return_code = NRF_SUCCESS;
-          bool packetAvailable = false;
-          bool sendTransferComplete = false;  
-          uint8_t packet[512];
-          uint16_t packet_size = m_ble_sensor_service_max_data_len /*- (m_ble_sensor_service_max_data_len % 8)*/;
-          uint16_t packet_number = (((1048576) / packet_size) + 1); // Number of packet to tranfer 1 Mb data array
-          uint16_t packet_addr = 1;
-          uint32_t start_time=0, end_time=0, number_of_packet = packet_number;
+            uint32_t return_code = NRF_SUCCESS;
+            bool sendTransferComplete = false;  
+            uint8_t packet[512];
+            uint16_t packet_size = m_ble_sensor_service_max_data_len /*- (m_ble_sensor_service_max_data_len % 8)*/;
+            uint16_t packet_number = (((8*1048576) / packet_size) + 1);  // Number of packet to tranfer 8 Mb data array
+            uint16_t packet_addr = 1;
+            uint32_t start_time=0, end_time=0, number_of_packet = packet_number;
 
-          start_time = my_app_timer_get_counter_value();
-          NRF_LOG_INFO("SENDING START.");
-          NRF_LOG_FLUSH();
+            start_time = my_app_timer_get_counter_value();
+            NRF_LOG_INFO("SENDING START.");
+            NRF_LOG_FLUSH();
           
-          while(sensor_service_status.is_transfer_started == 1)
-          {
-            if(packetAvailable == false)
+            while(sensor_service_status.is_transfer_started == 1)
             {
-              memset(packet, 0xFF, sizeof(packet));
-              packet[0] = (packet_addr >> 8);
-              packet[1] = (packet_addr);
-              packet[packet_size-1] = 0;
-
-              if(packet_number == 0)
-              { 
-                sendTransferComplete = true;  // TRANSFER COMPLETE FLAG
-                break;
-              }      
-              else
-              {
-                packetAvailable = true;
-                packet_number--;
-                packet_addr++;
-              }
-            }
-
-            return_code = ble_sensor_service_send_char2(&m_sensor_service, packet, packet_size, m_conn_handle);
-            if(return_code == NRF_SUCCESS)
-            {
-//              NRF_LOG_INFO("SENDING: %d.....", packet_addr);
-              packetAvailable = false;
-            }
-            else
-            {  
-              //NRF_LOG_INFO("SENDING ERROR: %d....", return_code);
-              packetAvailable = true;
-            }
-
-//            NRF_LOG_FLUSH();
-          } 
-
-          if(sendTransferComplete == true)
-          {
-            sendTransferComplete = false;
-
-            end_time = my_app_timer_get_counter_value();
-
-            memset(packet, 0x00, 4);
-            while (1)
-            {
-              return_code = ble_sensor_service_send_char2(&m_sensor_service, packet, 4, m_conn_handle);
-              if(return_code == NRF_SUCCESS)
-              {
-                NRF_LOG_INFO("SENDING FINISHED.");
-                NRF_LOG_FLUSH();
-
-                break;
-              }
-            }
-          }
+                /* Create Packet */
+                memset(packet, 0xFF, sizeof(packet));
+                packet[0] = (packet_addr >> 8);
+                packet[1] = (packet_addr);
+                packet[packet_size-1] = 0;
+                
+                if(packet_number == 0)
+                { 
+                  sendTransferComplete = true;  // TRANSFER COMPLETE FLAG
+                  break;
+                }      
+                else
+                {
+                  packet_number--;
+                  packet_addr++;
+                }
           
-          float elapsed_time = (end_time-start_time)*61.035f;
-          elapsed_time = elapsed_time/(1000.0f*1000.0f);
+                /* Send Packet */
+                do
+                {
+                  return_code = ble_sensor_service_send_char2(&m_sensor_service, packet, packet_size, m_conn_handle);
+                } while(return_code != NRF_SUCCESS);
+            } 
+
+            if(sendTransferComplete == true)
+            {
+                sendTransferComplete = false;
+
+                end_time = my_app_timer_get_counter_value();
+
+                memset(packet, 0x00, 4);
+                while (1)
+                {
+                    return_code = ble_sensor_service_send_char2(&m_sensor_service, packet, 4, m_conn_handle);
+                    if(return_code == NRF_SUCCESS)
+                    {
+                      NRF_LOG_INFO("SENDING FINISHED.");
+                      NRF_LOG_FLUSH();
+                      nrf_gpio_pin_clear(15);
+                      break;
+                    }
+                }
+            }
           
-          NRF_LOG_INFO("Elapsed time: " NRF_LOG_FLOAT_MARKER " sec", NRF_LOG_FLOAT(elapsed_time));
-          NRF_LOG_FLUSH();
+            float elapsed_time = (end_time-start_time)*61.035f;
+            elapsed_time = elapsed_time/(1000.0f*1000.0f);
+          
+            NRF_LOG_INFO("Elapsed time: " NRF_LOG_FLOAT_MARKER " sec", NRF_LOG_FLOAT(elapsed_time));
+            NRF_LOG_FLUSH();
 
-          NRF_LOG_INFO("Number of packet: %d", number_of_packet);
-          NRF_LOG_FLUSH();
+            NRF_LOG_INFO("Number of packet: %d", number_of_packet);
+            NRF_LOG_FLUSH();
 
-          float data_throughput = (number_of_packet*244*8)/(elapsed_time*1000.0f);
+            float data_throughput = (number_of_packet*244*8)/(elapsed_time*1000.0f);
 
-          NRF_LOG_INFO("Data Throughput: " NRF_LOG_FLOAT_MARKER " kbps", NRF_LOG_FLOAT(data_throughput));
-          NRF_LOG_FLUSH();
+            NRF_LOG_INFO("Data Throughput: " NRF_LOG_FLOAT_MARKER " kbps", NRF_LOG_FLOAT(data_throughput));
+            NRF_LOG_FLUSH();
 
-          sensor_service_status.is_transfer_started = 0;
+            sensor_service_status.is_transfer_started = 0;
         } /* IS_TRANSFER_STARTED */
         
         idle_state_handle();

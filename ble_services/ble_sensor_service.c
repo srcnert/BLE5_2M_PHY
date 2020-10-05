@@ -235,9 +235,9 @@ uint32_t ble_sensor_service_init(ble_sensor_service_t * p_sensor_service, ble_se
     add_char_params.p_init_value             = p_sensor_service->init_value_1;
     add_char_params.init_len                 = sizeof(uint8_t);
     add_char_params.is_var_len               = true;
-    add_char_params.char_props.write         = 1;
-    add_char_params.char_props.write_wo_resp = 0;
-    add_char_params.char_props.read          = 1;
+    add_char_params.char_props.write         = 0;
+    add_char_params.char_props.write_wo_resp = 1;
+    add_char_params.char_props.read          = 0;
     add_char_params.char_props.notify        = 0;
 
     memset(&user_descr, 0, sizeof(user_descr));
@@ -247,9 +247,9 @@ uint32_t ble_sensor_service_init(ble_sensor_service_t * p_sensor_service, ble_se
     user_descr.read_access  = SEC_OPEN;
     add_char_params.p_user_descr = &user_descr;
   
-    add_char_params.read_access  = SEC_OPEN;
+//    add_char_params.read_access  = SEC_OPEN;
     add_char_params.write_access = SEC_OPEN;
-    add_char_params.cccd_write_access = SEC_OPEN;
+//    add_char_params.cccd_write_access = SEC_OPEN;
 
     err_code = characteristic_add(p_sensor_service->service_handle, &add_char_params, &p_sensor_service->sensor_service_handles_1);
     if (err_code != NRF_SUCCESS)
@@ -277,8 +277,8 @@ uint32_t ble_sensor_service_init(ble_sensor_service_t * p_sensor_service, ble_se
     user_descr.read_access  = SEC_OPEN;
     add_char_params.p_user_descr = &user_descr;
   
-    add_char_params.read_access  = SEC_OPEN;
-    add_char_params.write_access = SEC_OPEN;
+//    add_char_params.read_access  = SEC_OPEN;
+//    add_char_params.write_access = SEC_OPEN;
     add_char_params.cccd_write_access = SEC_OPEN;
 
     err_code = characteristic_add(p_sensor_service->service_handle, &add_char_params, &p_sensor_service->sensor_service_handles_2);
